@@ -1,0 +1,60 @@
+# Raw and processed datasets (large files)
+data/raw/
+data/processed/
+
+# Trained model checkpoints
+models/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+.eggs/
+.Python
+env/
+venv/
+.venv/
+pip-log.txt
+pip-delete-this-directory.txt
+.tox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.log
+.mypy_cache/
+.pytest_cache/
+.hypothesis/
+
+# Jupyter
+.ipynb_checkpoints
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Environment
+.env
+.env.local
+*.env
+
+# Eval outputs (keep reports but not logs)
+eval/server_requests.jsonl
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# HuggingFace cache (if redirected here)
+.hf_cache/

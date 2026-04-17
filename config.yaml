@@ -1,0 +1,234 @@
+# Prompt Injection Gate - Central Configuration
+# All scripts and modules read from this file.
+
+# ---------------------------------------------------------------------------
+# Dataset definitions
+# ---------------------------------------------------------------------------
+datasets:
+  wildchat:
+    hf_id: "allenai/WildChat-1M"
+    save_dir: "data/raw/wildchat"
+    label: 0
+    source_name: "wildchat"
+    text_col: "conversation"          # list-of-turns; we extract user messages
+    label_col: null                   # derived: all benign
+    license: "ODC-BY"
+    include_in_training: true
+
+  oasst1:
+    hf_id: "OpenAssistant/oasst1"
+    save_dir: "data/raw/oasst1"
+    label: 0
+    source_name: "oasst1"
+    text_col: "text"
+    label_col: null                   # derived: prompter role == benign
+    role_col: "role"
+    role_filter: "prompter"
+    license: "Apache-2.0"
+    include_in_training: true
+
+  neuralchemy:
+    hf_id: "neuralchemy/Prompt-injection-dataset"
+    save_dir: "data/raw/neuralchemy"
+    source_name: "neuralchemy"
+    text_col: "text"
+    label_col: "label"               # 0/1 already present
+    license: "Apache-2.0"
+    include_in_training: true
+
+  advbench:
+    hf_id: "walledai/AdvBench"
+    save_dir: "data/raw/advbench"
+    label: 1
+    source_name: "advbench"
+    text_col: "prompt"
+    label_col: null                   # derived: all injections
+    license: "MIT"
+    include_in_training: true
+
+  tensor_trust:
+    hf_id: "HumanCompatibleAI/tensor-trust-data"
+    save_dir: "data/raw/tensor_trust"
+    source_name: "tensor_trust"
+    text_col: "attack"
+    label_col: null                   # derived from split
+    license: "Apache-2.0"
+    include_in_training: true
+
+  rogue_benchmark:
+    hf_id: "rogue-security/prompt-injections-benchmark"
+    save_dir: "data/raw/rogue_benchmark"
+    source_name: "rogue_benchmark"
+    text_col: "prompt"
+    label_col: "label"
+    license: "CC-BY-NC-4.0"
+    include_in_training: false        # EVALUATION ONLY - never train on this
+
+# ---------------------------------------------------------------------------
+# Data preparation
+# ---------------------------------------------------------------------------
+data:
+  processed_dir: "data/processed"
+  train_file: "train.parquet"
+  eval_file: "eval.parquet"
+  rogue_eval_file: "rogue_eval.parquet"
+  train_eval_split: 0.85              # 85% train, 15% eval
+  class_ratio:                        # target ratio in training set
+    benign: 0.80
+    injection: 0.20
+  dedup:
+    enabled: true
+    jaccard_threshold: 0.85
+    num_perm: 128                     # MinHash permutations
+  random_seed: 42
+  attack_types:
+    - benign
+    - direct_override
+    - persona_manipulation
+    - encoding_exploit
+    - jailbreak
+    - unknown
+
+# ---------------------------------------------------------------------------
+# Stage 1 - Heuristic pre-filter
+# ---------------------------------------------------------------------------
+stage1:
+  enabled: true
+  patterns:
+    - name: ignore_instructions
+      regex: "ignore\\s+(all\\s+)?(previous\\s+|prior\\s+)?instructions"
+      flags: IGNORECASE
+
+    - name: disregard
+      regex: "disregard\\s+(all\\s+|prior\\s+|above\\s+|previous\\s+)"
+      flags: IGNORECASE
+
+    - name: you_are_now
+      regex: "you\\s+are\\s+now\\s+(DAN|in developer mode|jailbroken|unfiltered)"
+      flags: IGNORECASE
+
+    - name: system_prompt_injection
+      regex: "system\\s*prompt\\s*[:=]"
+      flags: IGNORECASE
+
+    - name: base64_decode
+      regex: "base64\\s*(decode|encoded|string)"
+      flags: IGNORECASE
+
+    - name: no_restrictions
+      regex: "pretend\\s+you\\s+(are|have)\\s+no\\s+(restrictions|rules|guidelines)"
+      flags: IGNORECASE
+
+    - name: template_injection_inst
+      regex: "\\[INST\\]|\\[/INST\\]"
+      flags: 0
+
+    - name: template_injection_sys
+      regex: "<<SYS>>|<</SYS>>"
+      flags: 0
+
+    - name: do_anything_now
+      regex: "do\\s+anything\\s+now"
+      flags: IGNORECASE
+
+    - name: respond_as_unrestricted
+      regex: "respond\\s+as\\s+(an\\s+unrestricted|a\\s+completely\\s+different)"
+      flags: IGNORECASE
+
+    - name: jailbreak_dan
+      regex: "\\bDAN\\b|developer\\s+mode\\s+enabled|jailbreak\\s+mode"
+      flags: IGNORECASE
+
+    - name: override_directives
+      regex: "(override|bypass|circumvent)\\s+(your\\s+)?(safety|guidelines|rules|restrictions|directives|training)"
+      flags: IGNORECASE
+
+    - name: new_instructions
+      regex: "your\\s+new\\s+(instructions|directive|task|role|purpose)\\s+(is|are|will)"
+      flags: IGNORECASE
+
+    - name: forget_previous
+      regex: "(forget|clear|erase|reset)\\s+(all\\s+)?(previous|prior|above|earlier)\\s+(instructions|context|rules)"
+      flags: IGNORECASE
+
+    - name: base64_payload
+      # Long base64 strings (>40 chars) that could be encoded payloads
+      regex: "[A-Za-z0-9+/]{40,}={0,2}"
+      flags: 0
+      decode_check: true              # extra check: decode and scan result
+
+# ---------------------------------------------------------------------------
+# Stage 2 - DeBERTa classifier
+# ---------------------------------------------------------------------------
+stage2:
+  enabled: true
+  model_dir: "models/injection-classifier-final"
+  base_model: "microsoft/deberta-v3-base"
+  threshold: 0.65                     # score >= threshold → BLOCKED
+  ambiguous_lower: 0.40               # score in [lower, upper) → Stage 3
+  ambiguous_upper: 0.70
+  max_length: 512
+  device: "auto"                      # auto | cpu | cuda
+
+# ---------------------------------------------------------------------------
+# Stage 3 - LLM semantic analysis
+# ---------------------------------------------------------------------------
+stage3:
+  enabled: true
+  provider: "disabled"                # claude_api | ollama | disabled
+  claude:
+    model: "claude-sonnet-4-6"
+    max_tokens: 256
+    temperature: 0.0
+  ollama:
+    base_url: "http://localhost:11434"
+    model: "llama3"
+    timeout: 30
+
+# ---------------------------------------------------------------------------
+# Training hyperparameters
+# ---------------------------------------------------------------------------
+training:
+  base_model: "microsoft/deberta-v3-base"
+  output_dir: "models/injection-classifier"
+  final_dir: "models/injection-classifier-final"
+  num_train_epochs: 5
+  per_device_train_batch_size: 16
+  per_device_eval_batch_size: 32
+  learning_rate: 2.0e-5
+  warmup_ratio: 0.1
+  weight_decay: 0.01
+  fp16: auto                          # auto | true | false
+  max_length: 512
+  evaluation_strategy: "steps"
+  eval_steps: 500
+  save_strategy: "steps"
+  save_steps: 500
+  load_best_model_at_end: true
+  metric_for_best_model: "f1"
+  logging_steps: 100
+  dataloader_num_workers: 0           # 0 is safer on Windows
+
+# ---------------------------------------------------------------------------
+# Server settings
+# ---------------------------------------------------------------------------
+server:
+  host: "0.0.0.0"
+  port: 8081
+  log_file: "eval/server_requests.jsonl"
+  cors_origins:
+    - "*"
+
+# ---------------------------------------------------------------------------
+# Evaluation settings
+# ---------------------------------------------------------------------------
+evaluation:
+  output_dir: "eval"
+  report_file: "evaluation_report.json"
+  thresholds:
+    - 0.3
+    - 0.4
+    - 0.5
+    - 0.6
+    - 0.7
+    - 0.8
