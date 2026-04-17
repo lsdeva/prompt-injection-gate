@@ -288,8 +288,4 @@ Datasets have not been downloaded yet. Run:
 python scripts/download_datasets.py
 ```
 
-## License
 
-Code: MIT
-
-Each dataset retains its own license (see table above).
