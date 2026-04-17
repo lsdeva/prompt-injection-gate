@@ -163,7 +163,7 @@ stage1:
 stage2:
   enabled: true
   model_dir: "models/injection-classifier-final"
-  base_model: "microsoft/deberta-v3-base"
+  base_model: "distilbert-base-uncased"
   threshold: 0.65                     # score >= threshold → BLOCKED
   ambiguous_lower: 0.40               # score in [lower, upper) → Stage 3
   ambiguous_upper: 0.70
@@ -189,7 +189,7 @@ stage3:
 # Training hyperparameters
 # ---------------------------------------------------------------------------
 training:
-  base_model: "microsoft/deberta-v3-base"
+  base_model: "distilbert-base-uncased"
   output_dir: "models/injection-classifier"
   final_dir: "models/injection-classifier-final"
   num_train_epochs: 5

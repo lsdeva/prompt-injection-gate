@@ -133,10 +133,11 @@ def train(args: argparse.Namespace) -> None:
     epochs = args.epochs if args.epochs is not None else int(train_cfg.get("num_train_epochs", 5))
     batch_size = args.batch_size if args.batch_size is not None else int(train_cfg.get("per_device_train_batch_size", 16))
     max_length = args.max_length if args.max_length is not None else int(train_cfg.get("max_length", 512))
+    grad_accum = args.gradient_accumulation if args.gradient_accumulation is not None else int(train_cfg.get("gradient_accumulation_steps", 1))
 
     print(f"[INFO] Model        : {base_model}")
     print(f"[INFO] Epochs       : {epochs}")
-    print(f"[INFO] Batch        : {batch_size}")
+    print(f"[INFO] Batch        : {batch_size}  (grad_accum={grad_accum}, effective={batch_size * grad_accum})")
     print(f"[INFO] MaxLen       : {max_length}")
     print(f"[INFO] OutDir       : {output_dir}")
     if args.max_train_samples:
@@ -153,6 +154,14 @@ def train(args: argparse.Namespace) -> None:
         id2label={0: "benign", 1: "injection"},
         label2id={"benign": 0, "injection": 1},
     )
+    # Ensure float32 — some checkpoints ship as float16 (e.g. DeBERTa-v3).
+    # Pascal GPUs (GTX 10xx, compute cap 6.1) can't run FP16 training without
+    # grad scaling, which overflows, so always force FP32 before training.
+    if next(model.parameters()).dtype != torch.float32:
+        model = model.float()
+        print("[INFO] Model cast to float32")
+    else:
+        print(f"[INFO] Model dtype: float32")
 
     # Datasets
     print("[INFO] Loading datasets…")
@@ -174,22 +183,25 @@ def train(args: argparse.Namespace) -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
 
     # Compute warmup_steps from warmup_ratio since warmup_ratio is deprecated in v5+
-    total_steps = (len(train_ds) // batch_size) * epochs
+    total_steps = (len(train_ds) // batch_size) * epochs // grad_accum
     warmup_steps = max(1, int(total_steps * float(train_cfg.get("warmup_ratio", 0.1))))
+    # Eval/save every ~1/3 epoch (min 50, max 500 steps)
+    eval_save_steps = max(50, min(500, total_steps // 3))
 
     training_args = TrainingArguments(
         output_dir=str(output_dir),
         num_train_epochs=epochs,
         per_device_train_batch_size=batch_size,
+        gradient_accumulation_steps=grad_accum,
         per_device_eval_batch_size=int(train_cfg.get("per_device_eval_batch_size", 32)),
         learning_rate=float(train_cfg.get("learning_rate", 2e-5)),
         warmup_steps=warmup_steps,
         weight_decay=float(train_cfg.get("weight_decay", 0.01)),
         fp16=use_fp16,
         eval_strategy=train_cfg.get("evaluation_strategy", "steps"),
-        eval_steps=int(train_cfg.get("eval_steps", 500)),
+        eval_steps=eval_save_steps,
         save_strategy=train_cfg.get("save_strategy", "steps"),
-        save_steps=int(train_cfg.get("save_steps", 500)),
+        save_steps=eval_save_steps,
         load_best_model_at_end=train_cfg.get("load_best_model_at_end", True),
         metric_for_best_model=train_cfg.get("metric_for_best_model", "f1"),
         greater_is_better=True,
@@ -239,6 +251,7 @@ def main() -> None:
     parser.add_argument("--resume-from", type=str, default=None, help="Path to a checkpoint directory to resume from")
     parser.add_argument("--max-train-samples", type=int, default=None, help="Cap training samples for quick smoke tests (e.g. 500)")
     parser.add_argument("--no-fp16", action="store_true", help="Disable FP16 mixed precision (needed for Pascal GPUs like GTX 10xx)")
+    parser.add_argument("--gradient-accumulation", type=int, default=None, help="Gradient accumulation steps (use with small batch to keep effective batch size)")
     args = parser.parse_args()
     train(args)
 
