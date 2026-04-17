@@ -1,6 +1,6 @@
 # Prompt Injection Gate
 
-A multi-stage prompt injection detection pipeline that runs entirely on your laptop.
+A multi-stage prompt injection detection pipeline.
 Sits between user input and an LLM, detecting and blocking adversarial prompts before
 they reach the model.
 
