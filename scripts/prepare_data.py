@@ -426,13 +426,13 @@ def main() -> None:
 
     train_df.to_parquet(train_path, index=False)
     eval_df.to_parquet(eval_path, index=False)
-    print(f"\n  Saved train → {train_path}  ({len(train_df):,} rows)")
-    print(f"  Saved eval  → {eval_path}  ({len(eval_df):,} rows)")
+    print(f"\n  Saved train -> {train_path}  ({len(train_df):,} rows)")
+    print(f"  Saved eval  -> {eval_path}  ({len(eval_df):,} rows)")
 
     if rogue_rows:
         rogue_df = pd.DataFrame(rogue_rows, columns=SCHEMA_COLS)
         rogue_df.to_parquet(rogue_path, index=False)
-        print(f"  Saved rogue → {rogue_path}  ({len(rogue_df):,} rows)")
+        print(f"  Saved rogue -> {rogue_path}  ({len(rogue_df):,} rows)")
 
     # ── Final stats ───────────────────────────────────────────────────
     print("\n=== Final statistics ===")

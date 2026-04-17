@@ -70,12 +70,15 @@ class InjectionDataset:
             padding="max_length",
             return_tensors="pt",
         )
-        return {
+        item = {
             "input_ids": encoding["input_ids"].squeeze(),
             "attention_mask": encoding["attention_mask"].squeeze(),
-            "token_type_ids": encoding.get("token_type_ids", None) and encoding["token_type_ids"].squeeze(),
             "labels": self._labels[idx],
         }
+        # token_type_ids only if the tokenizer returns them (DeBERTa-v3 does not)
+        if "token_type_ids" in encoding:
+            item["token_type_ids"] = encoding["token_type_ids"].squeeze()
+        return item
 
 
 # ---------------------------------------------------------------------------
@@ -113,11 +116,15 @@ def train(args: argparse.Namespace) -> None:
     if args.cpu_only:
         use_fp16 = False
         print("[INFO] CPU-only mode — FP16 disabled")
+    elif args.no_fp16:
+        use_fp16 = False
+        print("[INFO] FP16 disabled by --no-fp16 flag")
     else:
         cuda_available = torch.cuda.is_available()
         fp16_cfg = train_cfg.get("fp16", "auto")
         if fp16_cfg == "auto":
-            use_fp16 = cuda_available
+            # Pascal GPUs (GTX 10xx) don't support FP16 grad scaling well
+            use_fp16 = cuda_available and torch.cuda.get_device_capability()[0] >= 7
         else:
             use_fp16 = bool(fp16_cfg)
         print(f"[INFO] CUDA: {'available' if cuda_available else 'not available'}  FP16: {use_fp16}")
@@ -166,13 +173,17 @@ def train(args: argparse.Namespace) -> None:
 
     output_dir.mkdir(parents=True, exist_ok=True)
 
+    # Compute warmup_steps from warmup_ratio since warmup_ratio is deprecated in v5+
+    total_steps = (len(train_ds) // batch_size) * epochs
+    warmup_steps = max(1, int(total_steps * float(train_cfg.get("warmup_ratio", 0.1))))
+
     training_args = TrainingArguments(
         output_dir=str(output_dir),
         num_train_epochs=epochs,
         per_device_train_batch_size=batch_size,
         per_device_eval_batch_size=int(train_cfg.get("per_device_eval_batch_size", 32)),
         learning_rate=float(train_cfg.get("learning_rate", 2e-5)),
-        warmup_ratio=float(train_cfg.get("warmup_ratio", 0.1)),
+        warmup_steps=warmup_steps,
         weight_decay=float(train_cfg.get("weight_decay", 0.01)),
         fp16=use_fp16,
         eval_strategy=train_cfg.get("evaluation_strategy", "steps"),
@@ -186,7 +197,7 @@ def train(args: argparse.Namespace) -> None:
         dataloader_num_workers=int(train_cfg.get("dataloader_num_workers", 0)),
         report_to="none",
         save_total_limit=3,
-        no_cuda=args.cpu_only,
+        use_cpu=args.cpu_only,
     )
 
     trainer = Trainer(
@@ -195,7 +206,7 @@ def train(args: argparse.Namespace) -> None:
         train_dataset=train_ds,
         eval_dataset=eval_ds,
         compute_metrics=compute_metrics,
-        tokenizer=tokenizer,
+        processing_class=tokenizer,
     )
 
     # Resume from checkpoint if specified
@@ -227,6 +238,7 @@ def main() -> None:
     parser.add_argument("--cpu-only", action="store_true", help="Force CPU training even if GPU is available")
     parser.add_argument("--resume-from", type=str, default=None, help="Path to a checkpoint directory to resume from")
     parser.add_argument("--max-train-samples", type=int, default=None, help="Cap training samples for quick smoke tests (e.g. 500)")
+    parser.add_argument("--no-fp16", action="store_true", help="Disable FP16 mixed precision (needed for Pascal GPUs like GTX 10xx)")
     args = parser.parse_args()
     train(args)
 

@@ -207,10 +207,15 @@ async def classify(req: ClassifyRequest) -> ClassifyResponse:
 
     _log_request(req.text, result)
 
+    raw_score = result["score"]
+    if raw_score is not None:
+        import math
+        raw_score = None if math.isnan(raw_score) or math.isinf(raw_score) else raw_score
+
     return ClassifyResponse(
         decision=result["decision"],
         stage=result["stage"],
-        score=result["score"],
+        score=raw_score,
         pattern=result["pattern"],
         reasoning=result["reasoning"],
         latency_ms=result["latency_ms"],
